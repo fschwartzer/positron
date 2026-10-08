@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SIRI Light — prova de conceito</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/maplibre-gl@6.13.0/dist/maplibre-gl.css"
+  />
+
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f5f5f5;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+    }
+
+    .panel {
+      position: absolute;
+      z-index: 2;
+      top: 16px;
+      left: 16px;
+      width: min(390px, calc(100% - 32px));
+      box-sizing: border-box;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      border-radius: 10px;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(6px);
+    }
+
+    .panel h1 {
+      margin: 0 0 6px 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .panel p {
+      margin: 0 0 10px 0;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #444;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid #cfcfcf;
+      background: #fff;
+      color: #222;
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #f1f1f1;
+    }
+
+    button.active {
+      background: #222;
+      color: #fff;
+      border-color: #222;
+    }
+
+    .badge {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 7px;
+      border-radius: 999px;
+      background: #efefef;
+      color: #555;
+      font-size: 11px;
+    }
+
+    @media (max-width: 640px) {
+      .panel {
+        top: 10px;
+        left: 10px;
+        width: calc(100% - 20px);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <div class="panel">
+    <h1>SIRI Light — prova de conceito</h1>
+    <p>
+      Exemplo de mapa-base com dados OpenStreetMap, renderização vetorial em
+      MapLibre e estilo minimalista. A ideia é manter o mapa em segundo plano
+      para destacar as camadas temáticas do SIRI.
+    </p>
+
+    <div class="controls">
+      <button id="labelsBtn" class="active">Nomes visíveis</button>
+      <button id="poiBtn">POIs ocultos</button>
+      <button id="buildingsBtn">Edificações ocultas</button>
+      <button id="resetBtn">Voltar a Porto Alegre</button>
+    </div>
+
+    <span class="badge">OpenStreetMap + OpenFreeMap + MapLibre</span>
+  </div>
+
+  <script type="module">
+    import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.13.0/dist/maplibre-gl.mjs';
+
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://tiles.openfreemap.org/styles/positron',
+      center: [-51.225, -30.030],
+      zoom: 13.2,
+      attributionControl: true,
+      maplibreLogo: true
+    });
+
+    map.addControl(
+      new maplibregl.NavigationControl({
+        showCompass: true,
+        showZoom: true
+      }),
+      'top-right'
+    );
+
+    let labelsVisible = true;
+    let poiVisible = false;
+    let buildingsVisible = false;
+
+    function layerIds() {
+      const style = map.getStyle();
+      return style && style.layers ? style.layers.map(layer => layer.id) : [];
+    }
+
+    function setVisibilityByMatcher(matcher, visible) {
+      layerIds().forEach(id => {
+        if (matcher(id)) {
+          try {
+            map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+          } catch (_) {}
+        }
+      });
+    }
+
+    function isLabelLayer(id) {
+      const layer = map.getLayer(id);
+      return layer && layer.type === 'symbol';
+    }
+
+    function isPoiLayer(id) {
+      const s = id.toLowerCase();
+      return (
+        s.includes('poi') ||
+        s.includes('shop') ||
+        s.includes('amenity') ||
+        s.includes('restaurant') ||
+        s.includes('hospital') ||
+        s.includes('school')
+      );
+    }
+
+    function isBuildingLayer(id) {
+      return id.toLowerCase().includes('building');
+    }
+
+    function updateButtons() {
+      const labelsBtn = document.getElementById('labelsBtn');
+      labelsBtn.textContent = labelsVisible ? 'Nomes visíveis' : 'Nomes ocultos';
+      labelsBtn.classList.toggle('active', labelsVisible);
+
+      const poiBtn = document.getElementById('poiBtn');
+      poiBtn.textContent = poiVisible ? 'POIs visíveis' : 'POIs ocultos';
+      poiBtn.classList.toggle('active', poiVisible);
+
+      const buildingsBtn = document.getElementById('buildingsBtn');
+      buildingsBtn.textContent = buildingsVisible ? 'Edificações visíveis' : 'Edificações ocultas';
+      buildingsBtn.classList.toggle('active', buildingsVisible);
+    }
+
+    map.on('load', () => {
+      // Estado inicial mais limpo.
+      setVisibilityByMatcher(isPoiLayer, false);
+      setVisibilityByMatcher(isBuildingLayer, false);
+
+      // Camada demonstrativa semelhante a pontos temáticos do SIRI.
+      map.addSource('siri-demo', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: [
+            { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-51.2306, -30.0282] } },
+            { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-51.2204, -30.0341] } },
+            { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-51.2116, -30.0208] } },
+            { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-51.2421, -30.0412] } }
+          ]
+        }
+      });
+
+      map.addLayer({
+        id: 'siri-demo-points',
+        type: 'circle',
+        source: 'siri-demo',
+        paint: {
+          'circle-radius': 5,
+          'circle-color': '#4f4f4f',
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#ffffff'
+        }
+      });
+
+      updateButtons();
+    });
+
+    document.getElementById('labelsBtn').addEventListener('click', () => {
+      labelsVisible = !labelsVisible;
+
+      layerIds().forEach(id => {
+        if (isLabelLayer(id) && !isPoiLayer(id)) {
+          try {
+            map.setLayoutProperty(id, 'visibility', labelsVisible ? 'visible' : 'none');
+          } catch (_) {}
+        }
+      });
+
+      updateButtons();
+    });
+
+    document.getElementById('poiBtn').addEventListener('click', () => {
+      poiVisible = !poiVisible;
+      setVisibilityByMatcher(isPoiLayer, poiVisible);
+      updateButtons();
+    });
+
+    document.getElementById('buildingsBtn').addEventListener('click', () => {
+      buildingsVisible = !buildingsVisible;
+      setVisibilityByMatcher(isBuildingLayer, buildingsVisible);
+      updateButtons();
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      map.flyTo({
+        center: [-51.225, -30.030],
+        zoom: 13.2,
+        essential: true
+      });
+    });
+  </script>
+</body>
+</html>
